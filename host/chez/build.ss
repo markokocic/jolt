@@ -121,6 +121,18 @@
       (or (bld-env-override "JOLT_CC") "cc")))
 (define (bld-arch-flag) (if (bld-cross?) (or (getenv "JOLT_TARGET_ARCH_FLAG") "") ""))
 
+;; Is the host's libc bionic (Android)? No Chez tag says it — Android builds as
+;; tarm64le, the same machine tag as glibc arm64 Linux (tools/cross-compile/
+;; README.md, "Target-pack requirements") — so ask the link compiler instead:
+;; an Android target triple carries "android" (Termux's cc reports
+;; aarch64-unknown-linux-android24). Probed once, on first use; a cross build
+;; never reaches it (its pack owns the flags).
+(define bld-bionic-probe
+  (delay
+    (bld-contains? (bld-sh-capture (string-append (bld-cc) " -dumpmachine 2>/dev/null"))
+                   "android")))
+(define (bld-bionic?) (force bld-bionic-probe))
+
 ;; Platform-appropriate flag to export executable symbols so a statically-linked
 ;; native lib's symbols resolve via (load-shared-object #f). macOS keeps unstripped
 ;; dlsym visibility; Windows needs an explicit export table; ELF (Linux) needs -rdynamic.
@@ -417,7 +429,13 @@
        ;; back to -l (the -L above, then LIBRARY_PATH, then the system dirs).
        (bld-compression-lib "lz4" #t)
        (bld-compression-lib "z" #t)
-       "-lncurses -ltinfo -ldl -lm -lpthread -luuid -lrt"))))
+       "-lncurses -ltinfo -ldl -lm -lpthread -luuid -lrt"
+       ;; bionic's libc has no iconv, and Chez's Linux sources compile their
+       ;; iconv support unconditionally, so a Termux kernel's libkernel.a
+       ;; carries libiconv_open/close: without -liconv the final link dies on
+       ;; both. glibc/musl are untouched — they carry iconv in libc and there
+       ;; is no libiconv.so to name.
+       (if (bld-bionic?) " -liconv" "")))))
 
 ;; --- optional built-binary startup profile ----------------------------------
 ;; JOLT_STARTUP_PROFILE=1 reports wall time, process CPU, collections,

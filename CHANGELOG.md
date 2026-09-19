@@ -29,6 +29,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   prevent. The bionic pair joins the tried list; the `buildsmoke` heap checks
   assert a default ceiling in a built binary.
 
+- **`jolt build` links on bionic (Android) with no wrapper.** The Linux link
+  line never named `-liconv`, and bionic's libc has no iconv: Chez's Linux
+  sources compile their iconv support unconditionally, so a Termux kernel's
+  `libkernel.a` carries `libiconv_open`/`libiconv_close` and every app link
+  died on both — which is why that platform needed a `cc` shim appending the
+  flag. The link line now adds `-liconv` when the link compiler targets
+  Android, asked of the compiler because no Chez tag can say it: Android
+  builds as `tarm64le`, the tag glibc arm64 Linux uses too.
+
 ### Performance
 
 - **A built app direct-calls the 49 core natives the boot defines in layers.**
