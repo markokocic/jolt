@@ -21,6 +21,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   constructed are gone, and `reset-context-state!` no longer clears a side
   table. `loaderconf` case 31 reproduces the reload shape.
 
+- **The default heap ceiling is computed on bionic (Android).** Physical-memory
+  detection tried only the glibc and Darwin `sysconf` name constants —
+  `_SC_PAGESIZE`/`_SC_PHYS_PAGES` as 30/85 and 29/200 — and bionic numbers its
+  names differently (39/98), so both pairs failed the plausibility check and a
+  built app ran with no ceiling, the kernel-kill scenario the ceiling exists to
+  prevent. The bionic pair joins the tried list; the `buildsmoke` heap checks
+  assert a default ceiling in a built binary.
+
 ### Performance
 
 - **A built app direct-calls the 49 core natives the boot defines in layers.**

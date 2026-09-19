@@ -305,12 +305,14 @@
 (define (heap-bytes-sane n)
   (and n (exact? n) (> n (* 128 1024 1024)) (< n (* 16 1024 1024 1024 1024)) n))
 ;; (_SC_PAGESIZE . _SC_PHYS_PAGES) per platform — 30/85 on glibc, 29/200 on
-;; Darwin. Tried in turn and sanity-checked, exactly as cpu-count-from-sysconf
-;; does for _SC_NPROCESSORS_ONLN.
+;; Darwin, 39/98 on bionic (Android numbers its sysconf names differently).
+;; Tried in turn and sanity-checked, exactly as cpu-count-from-sysconf does
+;; for _SC_NPROCESSORS_ONLN; a pair that means something else on the running
+;; platform fails the check rather than answering with a wrong reading.
 (define (heap-phys-from-sysconf)
   (and heap-sysconf
        (guard (e (#t #f))
-         (let try ((pairs '((30 . 85) (29 . 200))))
+         (let try ((pairs '((30 . 85) (29 . 200) (39 . 98))))
            (and (pair? pairs)
                 (let ((ps (heap-sysconf (caar pairs)))
                       (np (heap-sysconf (cdar pairs))))
