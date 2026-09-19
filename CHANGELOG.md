@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **A loader's `clojure.java.io/resource` / `ClassLoader` facade no longer
+  goes stale when its `:id` is reused.** `as-classloader` cached facades in an
+  id-keyed side table, and neither `unload!` nor a new `classpath` with the
+  same id replaced an entry — so a second context minted with a used id (a
+  `/reload`, a per-request context) resolved `io/resource` and the
+  `ClassLoader` resource methods through the first context's facade, which
+  wraps the first, now unloaded loader: "loader <id> is unloaded". The one
+  facade now lives on the loader itself (a `compare-and-set!` slot), keyed by
+  identity; the id-keyed table and its retention of every loader ever
+  constructed are gone, and `reset-context-state!` no longer clears a side
+  table. `loaderconf` case 31 reproduces the reload shape.
+
 ### Performance
 
 - **A built app direct-calls the 49 core natives the boot defines in layers.**

@@ -124,9 +124,10 @@
   a sound per-context artifact cache belongs with per-context var tables.
 
   One bookkeeping note: `loaders-by-id` — what evaluated source uses to find
-  the loader that owns it — and each loader's facade keep every loader ever
-  constructed reachable, so a process that mints a context per request
-  accumulates them."
+  the loader that owns it — keeps every loader ever constructed reachable, so
+  a process that mints a context per request accumulates them. A loader's
+  facade lives on the loader, not in a side table, so it adds no retention of
+  its own."
   (:refer-clojure :exclude [find resolve load])
   (:require [clojure.java.io :as io]
             [clojure.string :as str]
@@ -621,7 +622,8 @@
              members (assoc :members (vec members))
              (some? context) (assoc :context context)
              (some? classloader) (assoc :classloader classloader))
-           {:links (atom {}) :in-flight (atom {}) :unloaded? (atom false)})]
+           {:links (atom {}) :in-flight (atom {}) :unloaded? (atom false)
+            :facade (atom nil)})]
     (swap! loaders-by-id assoc (:id l) l)
     l))
 
@@ -1559,10 +1561,14 @@
 ;; its tag. The methods are `find` + `open-hit`, so the facade is exactly the
 ;; context's resource view and holds no handle between calls. One facade per
 ;; loader, so identity holds and getParent chains.
+;;
+;; The one facade lives in the loader's own state — keyed by the loader, never
+;; by its reusable `:id`. An id-keyed cache served a stale facade to a context
+;; minted with an id that was used before (a reload, a per-request context):
+;; the facade wrapped the previous, now unloaded loader, and every resource
+;; read through it threw "loader <id> is unloaded".
 
 (declare as-classloader)
-
-(defonce ^:private facades (atom {}))
 
 (defonce ^:private facade-methods-registered? (atom false))
 
@@ -1597,6 +1603,12 @@
       (fn [self]
         (str "jolt.loader<" (:id (jolt.host/ref-get self :loader)) ">"))})))
 
+(defn- mint-facade
+  [l]
+  (doto (jolt.host/tagged-table :classloader-facade)
+    (jolt.host/ref-put! :class "java.lang.ClassLoader")
+    (jolt.host/ref-put! :loader l)))
+
 (defn as-classloader
   "`l` as a host java.lang.ClassLoader: loadClass is find + load,
    getResource/getResources/getResourceAsStream are find + open-hit, getParent
@@ -1604,16 +1616,16 @@
    clojure.java.io/resource."
   [l]
   (ensure-facade-methods!)
-  (let [facade (fn []
-                 (doto (jolt.host/tagged-table :classloader-facade)
-                   (jolt.host/ref-put! :class "java.lang.ClassLoader")
-                   (jolt.host/ref-put! :loader l)))]
-    (if-let [id (:id l)]
-      (or (get @facades id)
-          (let [f (facade)]
-            (swap! facades assoc id f)
-            f))
-      (facade))))
+  (if-let [slot (:facade (:state l))]
+    (if-let [f @slot]
+      f
+      (let [f (mint-facade l)]
+        ;; compare-and-set!, not reset!: two racers must not walk away with
+        ;; two different facades for one loader.
+        (if (compare-and-set! slot nil f) f @slot)))
+    ;; a loader not built through make-loader (no state slot): nothing to
+    ;; cache on, mint per call.
+    (mint-facade l)))
 
 ;; clojure.lang.RT/baseLoader must follow the ambient loader the way the JVM's
 ;; returns the classloader of the calling class: bound inside `with-loader`, it
@@ -1628,8 +1640,8 @@
                     host-base-loader))})
 
 (defn reset-context-state!
-  "Drop every loader and facade minted so far (the host root's registration
-   stays) and clear the private-namespace ownership table: the host test
+  "Drop every loader minted so far (the host root's registration stays) and
+   clear the private-namespace ownership table: the host test
    harness (run-case-isolation.ss) calls this between rows, whose namespaces it
    prunes from the registry anyway, so one row cannot see the previous row's
    contexts. Harness bookkeeping, not part of the loader contract — contexts
@@ -1637,7 +1649,6 @@
   []
   (let [root-id (some-> @root-loader :id)]
     (swap! loaders-by-id (fn [m] (if root-id (select-keys m [root-id]) {})))
-    (swap! facades (fn [m] (if root-id (select-keys m [root-id]) {})))
     (swap! private-ns-owners
            (fn [m]
              (if root-id

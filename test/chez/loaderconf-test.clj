@@ -724,6 +724,30 @@
       (chk "a root that is a file but not an archive is refused eagerly"
            (= :loader/bad-root (:type (ex-data err)))))))
 
+;; --- 31. one facade per loader, not per id ----------------------------------
+;; A context's facade is cached on the loader, never keyed by `:id` — an id may
+;; be reused (a reload, a per-request context). Keyed by id, the second context
+;; received the first, unloaded context's facade, and every resource read
+;; through it threw "loader <id> is unloaded".
+(defcase 31 "a reused :id gets a fresh facade, not the unloaded context's"
+  (let [d (write! (root-dir "facade-reuse") "fac.edn" "{:from :ctx}")
+        old (l/classpath [d] {:id "facade-reused" :parent (l/isolated)})
+        old-cl (l/as-classloader old)]
+    (chk "one loader has one facade" (identical? old-cl (l/as-classloader old)))
+    (chk "the facade reads its context's resource"
+         (= "{:from :ctx}" (slurp (.getResourceAsStream old-cl "fac.edn"))))
+    (l/unload! old)
+    (let [new (l/classpath [d] {:id "facade-reused" :parent (l/isolated)})
+          new-cl (l/as-classloader new)]
+      (chk "the new context's facade is a different object"
+           (not (identical? old-cl new-cl)))
+      (chk "and it reads through the new context"
+           (= "{:from :ctx}" (slurp (.getResourceAsStream new-cl "fac.edn"))))
+      (chk "the 2-arity io/resource agrees" (some? (io/resource "fac.edn" new-cl)))
+      (chk "so does the ambient loader inside the context"
+           (identical? new-cl (l/with-loader* new (fn [] (clojure.lang.RT/baseLoader)))))
+      (l/unload! new))))
+
 ;; --- runner -----------------------------------------------------------------
 (defn run-case [[n title body]]
   (reset! failures [])
