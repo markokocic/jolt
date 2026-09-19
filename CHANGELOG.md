@@ -38,6 +38,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Android, asked of the compiler because no Chez tag can say it: Android
   builds as `tarm64le`, the tag glibc arm64 Linux uses too.
 
+- **Bionic provisions its own Chez.** With no Chez 10.x on `PATH`, `make` fell
+  through to makes' provisioning, which assumes glibc twice over: `gcc.mk`
+  fetches xPack GCC (a glibc binary the bionic loader cannot exec) and Chez's
+  `make install` hard-links petite/scheme-script — refused with EACCES under
+  app data. On bionic `make` now builds the pinned release with the host
+  compiler and stages the install itself
+  (`host/chez/bionic-provision-chez.sh`): same tarball and configure flags as
+  makes', plus `LIBS=-liconv`, symlinks in place of hard links, and static
+  `libz.a`/`liblz4.a` beside the kernel. A Chez on `PATH` still wins, as
+  before.
+
 ### Performance
 
 - **A built app direct-calls the 49 core natives the boot defines in layers.**

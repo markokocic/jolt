@@ -51,8 +51,28 @@ JOLT-CHEZ := $(shell \
   done)
 endif
 endif
+# bionic (Android's libc) is not readable off a machine tag — Android builds as
+# tarm64le, the same tag as glibc arm64 Linux — so ask the compiler, as
+# build.ss's bld-bionic? does. makes' provisioning assumes glibc twice over
+# (xPack GCC, Chez's hard-link install), so bionic provisions its own below.
+JOLT-BIONIC := $(if $(findstring android,$(shell cc -dumpmachine 2>/dev/null)),1,)
+
 ifneq (,$(JOLT-CHEZ))
 SHELL-DEPS += $(JOLT-CHEZ)
+else ifeq (1,$(JOLT-BIONIC))
+$(eval $(call include-local))
+# The pinned release, built with the host compiler and staged without Chez's
+# hard-link install — host/chez/bionic-provision-chez.sh says why. The prefix
+# is makes' own layout, so bin/jolt's .cache/local glob finds it.
+CHEZSCHEME-VERSION ?= $(or $(shell sed -n 's/^CHEZSCHEME-VERSION ?= *//p' $M/chezscheme.mk | head -n1),10.4.1)
+CHEZSCHEME-DIR := csv$(CHEZSCHEME-VERSION)
+CHEZSCHEME-LOCAL := $(LOCAL-ROOT)/chezscheme-$(CHEZSCHEME-VERSION)
+CHEZSCHEME := $(CHEZSCHEME-LOCAL)/bin/scheme
+PETITE-CHEZSCHEME := $(CHEZSCHEME-LOCAL)/bin/petite
+$(CHEZSCHEME):
+	$Q sh host/chez/bionic-provision-chez.sh '$(CHEZSCHEME-LOCAL)' '$(CHEZSCHEME-VERSION)'
+SHELL-DEPS += $(CHEZSCHEME)
+JOLT-CHEZ := $(CHEZSCHEME)
 else
 include $M/chezscheme.mk
 JOLT-CHEZ := $(CHEZSCHEME)
